@@ -1,7 +1,7 @@
 package com.library.service;
 
-import com.library.entity.BaseBook;
-import com.library.entity.Member;
+import com.library.entity.abstracts.AbstractBaseBook;
+import com.library.entity.abstracts.AbstractMember;
 import com.library.enums.BookStatus;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -10,18 +10,19 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class LoanService {
-    private final Map<Long, LocalDate> loanDates = new HashMap<>();
-    private final Map<Long, Double> activeDeposits = new HashMap<>();
+    // Key tipleri Long -> String olarak güncellendi
+    private final Map<String, LocalDate> loanDates = new HashMap<>();
+    private final Map<String, Double> activeDeposits = new HashMap<>();
 
     private final LibraryBudget budget;
     private final double DAILY_PENALTY = 5.0;
     private final int MAX_LOAN_DAYS = 14;
 
-    public Map<Long, LocalDate> getAllLoanedBooks() {
+    public Map<String, LocalDate> getAllLoanedBooks() {
         return Collections.unmodifiableMap(loanDates);
     }
 
-    public Map<Long, Double> getAllActiveDeposits() {
+    public Map<String, Double> getAllActiveDeposits() {
         return Collections.unmodifiableMap(activeDeposits);
     }
 
@@ -37,7 +38,11 @@ public class LoanService {
         this.budget = budget;
     }
 
-    public void loanBook(Member member, BaseBook book) {
+    /**
+     * Ödünç verme işlemi.
+     * Artık LocalDate.now() yerine simülasyondaki systemDate (currentDate) parametresini kullanıyor.
+     */
+    public void loanBook(AbstractMember member, AbstractBaseBook book, LocalDate currentDate) {
         if (book.getStatus() != BookStatus.AVAILABLE) {
             throw new IllegalStateException("Book is not available!");
         }
@@ -47,13 +52,19 @@ public class LoanService {
         member.addBorrowedBook(book);
         book.setStatus(BookStatus.LOANED);
 
-        loanDates.put(book.getId(), LocalDate.now());
+        // Tarih artık parametre olarak gelen currentDate (sanal zaman) üzerinden saklanıyor
+        loanDates.put(book.getId(), currentDate);
         activeDeposits.put(book.getId(), depositAmount);
 
         System.out.println(book.getTitle() + " ödünç verildi. Alınan depozito: " + depositAmount);
     }
 
-    public void returnBook(Member member, BaseBook book) {
+    /**
+     * İade alma işlemi.
+     * Gecikme hesaplaması parametre olarak gelen currentDate (sanal zaman) üzerinden yapılıyor.
+     */
+    public void returnBook(AbstractMember member, AbstractBaseBook book, LocalDate currentDate) {
+        // containsKey artık String bekliyor
         if (!loanDates.containsKey(book.getId())) {
             throw new IllegalArgumentException("Bu kitap bu servis üzerinden verilmemiş!");
         }
@@ -64,7 +75,9 @@ public class LoanService {
 
         LocalDate loanDate = loanDates.get(book.getId());
         double takenDeposit = activeDeposits.get(book.getId());
-        long daysBetween = ChronoUnit.DAYS.between(loanDate, LocalDate.now());
+
+        // Gecikme hesaplaması artık LocalDate.now() yerine currentDate (sanal zaman) kullanıyor
+        long daysBetween = ChronoUnit.DAYS.between(loanDate, currentDate);
 
         double totalPenalty = 0.0;
 
@@ -90,11 +103,15 @@ public class LoanService {
         }
 
         member.removeBorrowedBook(book);
-        book.setStatus(BookStatus.AVAILABLE);
+
+        // Önemli: Kitap statüsü Main'de Hasarlı/Kayıp olarak setlenmiş olabilir.
+        // Eğer statü Main'de değiştirilmediyse (Hala LOANED ise) AVAILABLE yap.
+        if (book.getStatus() == BookStatus.LOANED) {
+            book.setStatus(BookStatus.AVAILABLE);
+        }
+
+        // Remove işlemleri String ID ile yapılıyor
         loanDates.remove(book.getId());
         activeDeposits.remove(book.getId());
     }
 }
-
-//Override etmiyorum toString'i çünkü burada üye ID'leri de tutuluyor. Bunların dışarı çıkmasını istemiyoruz.
-//Karşılaştırma yapılmayacağı için equals ve hashcode da ezilmeyecek.

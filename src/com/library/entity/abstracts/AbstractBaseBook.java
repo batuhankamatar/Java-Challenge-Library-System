@@ -1,18 +1,24 @@
-package com.library.entity;
+package com.library.entity.abstracts;
 
+import com.library.entity.interfaces.Categorizable;
+import com.library.entity.interfaces.Identifiable;
+import com.library.entity.interfaces.Loanable;
+import com.library.entity.interfaces.Searchable;
 import com.library.enums.BookGenre;
 import com.library.enums.BookStatus;
+import java.util.UUID;
+import java.util.Objects;
 
-public abstract class BaseBook {
-    private final long id;
+public abstract class AbstractBaseBook implements Identifiable, Searchable, Loanable, Categorizable {
+    private final String id; // long -> String
     private String title;
     private String author;
     private double price; //Hasar durumunda üyenin totalDebt'ine eklenecek fiyat.
     private BookStatus status;
     private BookGenre genre;
 
-    public BaseBook(long id, String title, String author, double price, BookStatus status, BookGenre genre) {
-        this.id = id;
+    public AbstractBaseBook(String title, String author, double price, BookStatus status, BookGenre genre) {
+        this.id = UUID.randomUUID().toString(); // ID otomatik üretiliyor
         this.title = title;
         this.author = author;
         this.price = price;
@@ -20,7 +26,7 @@ public abstract class BaseBook {
         this.genre = genre;
     }
 
-    public long getId() {
+    public String getId() { // return tipi String oldu
         return id;
     }
 
@@ -84,12 +90,17 @@ public abstract class BaseBook {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        BaseBook baseBook = (BaseBook) o;
-        return id == baseBook.id;
+        AbstractBaseBook baseBook = (AbstractBaseBook) o;
+        return Objects.equals(id, baseBook.id); // String karşılaştırması için güncellendi
     }
 
     @Override
     public int hashCode() {
-        return Long.hashCode(id);
+        return Objects.hashCode(id); // String hash kodu için güncellendi
+    }
+
+    @Override
+    public String getSearchKey() {
+        return title;
     }
 }

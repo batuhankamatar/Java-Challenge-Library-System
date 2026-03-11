@@ -1,4 +1,4 @@
-package com.library.entity;
+package com.library.entity.abstracts;
 
 import com.library.enums.MemberType;
 
@@ -6,15 +6,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public abstract class Member extends Person {
+public abstract class AbstractMember extends AbstractPerson {
     private MemberType type;
     private double totalDebt;
     private int bookLimit;
     private double totalDonation;
-    private List<BaseBook> borrowedBooks;
+    private List<AbstractBaseBook> borrowedBooks;
 
-    public Member(long id, String name, String surname, MemberType type) {
-        super(id, name, surname);
+    public AbstractMember(String name, String surname, MemberType type) {
+        // long id parametresi kaldırıldı, super artık üst sınıfta UUID yönetimini tetikleyecek
+        super(name, surname);
         this.type = type;
         this.totalDebt = 0.0;
         this.totalDonation = type.getPrice();
@@ -59,10 +60,10 @@ public abstract class Member extends Person {
         if (amount <= 0)
             throw new IllegalArgumentException("Payment must be positive!");
 
-        this.totalDebt -= amount;
+        this.totalDebt = Math.max(0, this.totalDebt - amount);
     }
 
-    public void addBorrowedBook(BaseBook book) {
+    public void addBorrowedBook(AbstractBaseBook book) {
         if (this.borrowedBooks.size() >= this.bookLimit) {
             throw new IllegalStateException(getName() + " has reached the book limit (" + bookLimit + ")!");
         }
@@ -70,11 +71,11 @@ public abstract class Member extends Person {
         this.borrowedBooks.add(book);
     }
 
-    public void removeBorrowedBook(BaseBook book) {
+    public void removeBorrowedBook(AbstractBaseBook book) {
         this.borrowedBooks.remove(book);
     }
 
-    public List<BaseBook> getBorrowedBooks() {
+    public List<AbstractBaseBook> getBorrowedBooks() {
         return Collections.unmodifiableList(borrowedBooks);
     }
 

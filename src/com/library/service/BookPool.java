@@ -1,39 +1,39 @@
 package com.library.service;
 
-import com.library.entity.BaseBook;
+import com.library.entity.abstracts.AbstractBaseBook;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 public class BookPool {
-    private List<BaseBook> newArrivals;
-    private List<BaseBook> returnedBooks;
+    private List<AbstractBaseBook> newArrivals;
+    private List<AbstractBaseBook> returnedBooks;
 
     public BookPool() {
         this.newArrivals = new ArrayList<>();
         this.returnedBooks = new ArrayList<>();
     }
 
-    public void addNewArrival(BaseBook book) {
+    public void addNewArrival(AbstractBaseBook book) {
         if (book == null) {
             throw new IllegalArgumentException("Cannot add a null book to arrivals!");
         }
         newArrivals.add(book);
     }
 
-    public void addReturnedBook(BaseBook book) {
+    public void addReturnedBook(AbstractBaseBook book) {
         if (book == null) {
             throw new IllegalArgumentException("Cannot add a null book to returns!");
         }
         returnedBooks.add(book);
     }
 
-    public List<BaseBook> getNewArrivals() {
+    public List<AbstractBaseBook> getNewArrivals() {
         return Collections.unmodifiableList(newArrivals);
     }
 
-    public List<BaseBook> getReturnedBooks() {
+    public List<AbstractBaseBook> getReturnedBooks() {
         return Collections.unmodifiableList(returnedBooks);
     }
 
