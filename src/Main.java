@@ -8,14 +8,18 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 public class Main {
+    // Sistem Bileşenleri
     private static LibraryManager manager;
     private static Map<String, AbstractMember> memberRegistry = new HashMap<>();
-    private static LocalDate systemDate = LocalDate.now();
+    private static LocalDate systemDate = LocalDate.now(); // Simülasyonun kalbi: Sanal Zaman
     private static final Scanner scanner = new Scanner(System.in);
 
+    // Servis nesnelerine erişim için
     private static BookPool bookPool;
     private static LoanService loanService;
     private static LibraryBudget budget;
+    // Gelir takibi için detaylı liste
+    private static List<String> monthlyIncomeLog = new ArrayList<>();
 
     public static void main(String[] args) {
         initSystem();
@@ -65,7 +69,12 @@ public class Main {
 
         AbstractMember m1 = new StandardMember("Ali", "Kaya");
         memberRegistry.put(m1.getId(), m1);
-        budget.addToCurrentMonthPool(m1.getType().getPrice());
+        double fee = m1.getType().getPrice();
+        budget.addToCurrentMonthPool(fee);
+        monthlyIncomeLog.add(String.format("[%s] Yeni Üye Kaydı: %s %s (+%.2f TL)", systemDate, m1.getName(), m1.getSurname(), fee));
+
+        // Devlet hibesi ve gider döngüsü başlar
+        budget.executeMonthEndCycle();
 
         System.out.println(">>> Kütüphane Otomasyonu Başlatıldı.");
         System.out.println(">>> Toplam 103 kitap raflara dizildi.");
@@ -93,12 +102,32 @@ public class Main {
                     case "12" -> handleDonation();
                     case "13" -> systemTimeFastForward();
                     case "14" -> deleteMember();
+                    case "15" -> updateMemberInfo();
+                    case "16" -> showDetailedBudget();
                     case "0" -> System.exit(0);
+                    case "17" -> findLoanerInfo();
                     default -> System.out.println("![HATA] Geçersiz seçenek.");
                 }
             } catch (Exception e) {
                 System.out.println("![HATA] " + e.getMessage());
             }
+        }
+    }
+
+    private static void findLoanerInfo() {
+        System.out.print("Sorgulanacak Kitap ID (8 hane): ");
+        String sid = scanner.nextLine();
+        AbstractMember loaner = memberRegistry.values().stream()
+                .filter(m -> m.getBorrowedBooks().stream().anyMatch(b -> b.getId().startsWith(sid)))
+                .findFirst().orElse(null);
+
+        if (loaner != null) {
+            AbstractBaseBook book = loaner.getBorrowedBooks().stream().filter(b -> b.getId().startsWith(sid)).findFirst().get();
+            LocalDate lDate = loanService.getAllLoanedBooks().get(book.getId());
+            System.out.printf("KİTAP: %s | ÜYE: %s %s | ALIM: %s | İADE: %s%n",
+                    book.getTitle(), loaner.getName(), loaner.getSurname(), lDate, lDate.plusDays(14));
+        } else {
+            System.out.println("Kitap şu an kimsede değil veya ID hatalı.");
         }
     }
 
@@ -119,8 +148,62 @@ public class Main {
             default -> new StandardMember(n, s);
         };
         memberRegistry.put(member.getId(), member);
-        budget.addToCurrentMonthPool(member.getType().getPrice());
+        double fee = member.getType().getPrice();
+        budget.addToCurrentMonthPool(fee);
+        monthlyIncomeLog.add(String.format("[%s] Yeni Üye Kaydı: %s %s (+%.2f TL)", systemDate, n, s, fee));
         System.out.println("Üye kaydedildi. Ücret tahsil edildi.");
+    }
+
+    private static void updateMemberInfo() {
+        System.out.println("\n--- ÜYE BİLGİLERİNİ GÜNCELLE ---");
+        AbstractMember member = selectMember();
+        if (member == null) return;
+
+        System.out.println("1. İsim/Soyisim Güncelle | 0. İptal");
+        String sub = scanner.nextLine();
+        if (sub.equals("1")) {
+            System.out.print("Yeni İsim: "); String n = scanner.nextLine();
+            System.out.print("Yeni Soyisim: "); String s = scanner.nextLine();
+            member.setName(n);
+            member.setSurname(s);
+            System.out.println("Bilgiler güncellendi: " + member.getName() + " " + member.getSurname());
+        }
+    }
+
+    private static void showDetailedBudget() {
+        System.out.println("\n" + "=".repeat(60));
+        System.out.println("   MERKEZİ MUHASEBE VE BÜTÇE DEFTERİ");
+        System.out.println("=".repeat(60));
+        System.out.printf("Net Kasa Bakiyesi (Harcanabilir): %.2f TL%n", budget.getAvailableBalance());
+        System.out.printf("Ay Sonu Beklenen Devlet Desteği: %.2f TL%n", 1000.0);
+        System.out.printf("Sabit Giderler: %.2f TL%n", 500.0);
+        System.out.printf("Emanetteki Depozitolar (Toplam): %.2f TL%n", loanService.getTotalValueInDepositWait());
+
+        System.out.println("\n--- AKTİF DEPOZİTO VE GECİKME DETAYLARI ---");
+        boolean anyLoan = false;
+        for (AbstractMember m : memberRegistry.values()) {
+            for (AbstractBaseBook b : m.getBorrowedBooks()) {
+                anyLoan = true;
+                LocalDate lDate = loanService.getAllLoanedBooks().get(b.getId());
+                long days = ChronoUnit.DAYS.between(lDate, systemDate);
+                long overdue = days > 14 ? days - 14 : 0;
+                double dep = loanService.getAllActiveDeposits().getOrDefault(b.getId(), 0.0);
+                System.out.printf("> %s %s | Kitap: %s | Gecikme: %d gün | Kalan Depozito: %.2f TL%n",
+                        m.getName(), m.getSurname(), b.getTitle(), overdue, Math.max(0, dep - (overdue * 5.0)));
+            }
+        }
+        if(!anyLoan) System.out.println("Aktif emanet bulunmuyor.");
+
+        System.out.println("\n--- ÜYE BORÇ LİSTESİ ---");
+        memberRegistry.values().stream()
+                .filter(m -> calculateCurrentDebt(m) > 0)
+                .forEach(m -> System.out.printf("> %s %s | Ödenmesi Gereken Borç: %.2f TL%n",
+                        m.getName(), m.getSurname(), calculateCurrentDebt(m)));
+
+        System.out.println("\n--- BU AYKİ TÜM PARA HAREKETLERİ ---");
+        if (monthlyIncomeLog.isEmpty()) System.out.println("Hareket yok.");
+        else monthlyIncomeLog.forEach(l -> System.out.println(" " + l));
+        System.out.println("=".repeat(60));
     }
 
     private static void deleteMember() {
@@ -142,6 +225,14 @@ public class Main {
         System.out.println("\n--- ÖDÜNÇ VERME İŞLEMİ ---");
         AbstractMember member = selectMember();
         if (member == null) return;
+
+        // KOŞUL: Üyenin ödenmemiş borcu varsa yeni kitap alamaz
+        if (calculateCurrentDebt(member) > 0) {
+            System.out.printf("![ENGEL] %s %s, ödenmemiş %.2f TL borcunuz bulunmaktadır. Önce borcunuzu kapatmalısınız.%n",
+                    member.getName(), member.getSurname(), calculateCurrentDebt(member));
+            return;
+        }
+
         System.out.print("Aranacak Kitap Adı (Geri: 0): ");
         String title = scanner.nextLine();
         if (title.equals("0")) return;
@@ -186,10 +277,23 @@ public class Main {
             String cond = scanner.nextLine();
             if (cond.equals("0")) return;
 
-            // Eğer kitap hasarlı veya kayıpsa LoanService içindeki ceza mantığını tetikler
-            if (cond.equals("2")) book.setStatus(BookStatus.DAMAGED);
-            else if (cond.equals("3")) book.setStatus(BookStatus.LOST);
-            else book.setStatus(BookStatus.AVAILABLE);
+            double dep = loanService.getAllActiveDeposits().getOrDefault(book.getId(), 0.0);
+
+            if (cond.equals("2") || cond.equals("3")) {
+                budget.addToCurrentMonthPool(dep);
+                monthlyIncomeLog.add(String.format("[%s] Kitap %s Cezası (Depozito El Konuldu): %s (+%.2f TL)",
+                        systemDate, (cond.equals("2") ? "Hasar" : "Kayıp"), book.getTitle(), dep));
+
+                if (cond.equals("2")) book.setStatus(BookStatus.DAMAGED);
+                else {
+                    book.setStatus(BookStatus.LOST);
+                    member.removeBorrowedBook(book);
+                    System.out.println("Kitap KAYIP olarak işaretlendi. Depozito yakıldı ve üyeden düşüldü.");
+                    return;
+                }
+            } else {
+                book.setStatus(BookStatus.AVAILABLE);
+            }
 
             manager.returnBookFromMember(member, book, systemDate);
             System.out.println("İade işlemi tamamlandı.");
@@ -220,7 +324,6 @@ public class Main {
         String sid = scanner.nextLine();
         if (sid.equals("0")) return;
 
-        // 8 haneli ID ile gerçek kitabı bulma
         AbstractBaseBook target = manager.searchBookByTitle("").stream()
                 .filter(b -> b.getId().startsWith(sid))
                 .findFirst().orElse(null);
@@ -288,11 +391,62 @@ public class Main {
     }
 
     private static void payMemberDebt() {
-        AbstractMember m = selectMember();
-        if (m != null) {
-            System.out.print("Ödeme Miktarı: ");
-            manager.memberPaysDebt(m, Double.parseDouble(scanner.nextLine()));
+        System.out.println("\n--- ÜYE BORÇ ÖDEME PANELİ ---");
+
+        // Sadece borcu olanları listeleyeceğiz
+        List<AbstractMember> debtors = new ArrayList<>();
+        for (AbstractMember m : memberRegistry.values()) {
+            if (calculateCurrentDebt(m) > 0) debtors.add(m);
         }
+
+        if(debtors.isEmpty()) {
+            System.out.println("Şu an borcu olan üye bulunmamaktadır.");
+            return;
+        }
+
+        System.out.println("Borcu Olan Üyeler:");
+        for (AbstractMember m : debtors) {
+            System.out.printf("- %s %s | Toplam Borç: %.2f TL%n", m.getName(), m.getSurname(), calculateCurrentDebt(m));
+            // Detaylı gecikme bilgisini listele
+            for (AbstractBaseBook b : m.getBorrowedBooks()) {
+                LocalDate lDate = loanService.getAllLoanedBooks().get(b.getId());
+                long days = ChronoUnit.DAYS.between(lDate, systemDate);
+                if (days > 14) {
+                    System.out.printf("  > Kitap: %s | Gecikme: %d gün%n", b.getTitle(), days - 14);
+                }
+            }
+        }
+
+        System.out.println("\n[DİKKAT] Borç ödenebilmesi için önce ilgili kitabın iade edilmesi gerekir!");
+        AbstractMember m = selectMember();
+        if (m == null) return;
+
+        // KOŞUL: Kitap iade edilmeden borç ödenemez
+        if (!m.getBorrowedBooks().isEmpty()) {
+            boolean hasOverdueBook = false;
+            for (AbstractBaseBook b : m.getBorrowedBooks()) {
+                LocalDate lDate = loanService.getAllLoanedBooks().get(b.getId());
+                if (ChronoUnit.DAYS.between(lDate, systemDate) > 14) {
+                    hasOverdueBook = true;
+                    break;
+                }
+            }
+            if (hasOverdueBook) {
+                System.out.println("![ENGEL] Üyenin üzerinde gecikmiş kitap bulunmaktadır. Önce kitap iade edilmelidir!");
+                return;
+            }
+        }
+
+        double currentDebt = calculateCurrentDebt(m);
+        if (currentDebt <= 0) {
+            System.out.println("Bu üyenin güncel bir borcu bulunmamaktadır.");
+            return;
+        }
+
+        System.out.print("Ödeme Miktarı: ");
+        double amt = Double.parseDouble(scanner.nextLine());
+        manager.memberPaysDebt(m, amt);
+        monthlyIncomeLog.add(String.format("[%s] Borç Ödemesi: %s %s (+%.2f TL)", systemDate, m.getName(), m.getSurname(), amt));
     }
 
     private static void handleDonation() {
@@ -305,15 +459,14 @@ public class Main {
             double amt = Double.parseDouble(scanner.nextLine());
             m.donate(amt);
             budget.addToCurrentMonthPool(amt);
+            monthlyIncomeLog.add(String.format("[%s] Para Bağışı: %s %s (+%.2f TL)", systemDate, m.getName(), m.getSurname(), amt));
             System.out.println("Bağış kabul edildi.");
         } else if (c.equals("2")) {
             System.out.print("Kitap Adı: "); String t = scanner.nextLine();
             System.out.print("Yazar: "); String a = scanner.nextLine();
-            System.out.println("Kitap Türü (Örn: Fiction, History): ");
-            String genre = scanner.nextLine();
-            // Basit bir bağış kitabı oluşturma (Geliştirilebilir)
             bookPool.addNewArrival(new FictionBook(t, a, 100.0));
             m.donate(50.0);
+            monthlyIncomeLog.add(String.format("[%s] Kitap Bağışı: %s %s (Değer: 50 TL)", systemDate, m.getName(), m.getSurname()));
             System.out.println("Bağış kabul edildi.");
         }
     }
@@ -321,7 +474,26 @@ public class Main {
     private static void systemTimeFastForward() {
         System.out.print("Kaç gün ilerle: ");
         int days = Integer.parseInt(scanner.nextLine());
+
+        int oldMonth = systemDate.getMonthValue();
+        int oldYear = systemDate.getYear();
+
         systemDate = systemDate.plusDays(days);
+
+        int newMonth = systemDate.getMonthValue();
+        int newYear = systemDate.getYear();
+
+        long monthsPassed = ChronoUnit.MONTHS.between(
+                LocalDate.of(oldYear, oldMonth, 1),
+                LocalDate.of(newYear, newMonth, 1)
+        );
+
+        for(int i = 0; i < monthsPassed; i++) {
+            budget.executeMonthEndCycle();
+            monthlyIncomeLog.clear();
+            System.out.println(">>> " + (i+1) + ". ayın devlet hibesi eklendi ve giderler düşüldü.");
+        }
+
         System.out.println("Yeni Tarih: " + systemDate);
     }
 
@@ -337,13 +509,31 @@ public class Main {
         return null;
     }
 
+    private static double calculateCurrentDebt(AbstractMember m) {
+        double totalPenalty = 0;
+        for (AbstractBaseBook b : m.getBorrowedBooks()) {
+            LocalDate lDate = loanService.getAllLoanedBooks().get(b.getId());
+            if (lDate == null) continue;
+            long days = ChronoUnit.DAYS.between(lDate, systemDate);
+            if (days > 14) {
+                double penalty = (days - 14) * 5.0;
+                double dep = loanService.getAllActiveDeposits().getOrDefault(b.getId(), 0.0);
+                if (penalty > dep) {
+                    totalPenalty += (penalty - dep);
+                }
+            }
+        }
+        return m.getTotalDebt() + totalPenalty;
+    }
+
     private static void listMembers() {
-        System.out.println("\n--- DETAYLI ÜYE LİSTESİ ---");
+        System.out.println("\n--- DETAYLI ÜYE VE BORÇ LİSTESİ ---");
         if (memberRegistry.isEmpty()) { System.out.println("Kayıtlı üye bulunmamaktadır."); return; }
         for (AbstractMember m : memberRegistry.values()) {
             System.out.println("-------------------------------------------");
             System.out.printf("ÜYE: %s %s [%s] ID: %s%n", m.getName(), m.getSurname(), m.getType(), m.getId());
-            System.out.printf("Borç: %.2f TL | Bağış: %.2f TL | Kitap Limiti: %d/%d%n", m.getTotalDebt(), m.getTotalDonation(), m.getBorrowedBooks().size(), m.getBookLimit());
+            double debt = calculateCurrentDebt(m);
+            System.out.printf("TOPLAM BORÇ: %.2f TL | BAĞIŞ: %.2f TL | Limit: %d/%d%n", debt, m.getTotalDonation(), m.getBorrowedBooks().size(), m.getBookLimit());
             if (!m.getBorrowedBooks().isEmpty()) {
                 System.out.println("Kitaplar:");
                 for (AbstractBaseBook b : m.getBorrowedBooks()) {
@@ -352,7 +542,8 @@ public class Main {
                     long daysUsed = ChronoUnit.DAYS.between(effectiveDate, systemDate);
                     long daysLeft = 14 - daysUsed;
                     double dep = loanService.getAllActiveDeposits().getOrDefault(b.getId(), 0.0);
-                    System.out.printf("  > %-20s | Alındığı Tarih: %s | Kalan Gün: %d | Depozito: %.2f%n", b.getTitle(), effectiveDate, daysLeft, dep);
+                    double penalty = daysUsed > 14 ? (daysUsed - 14) * 5.0 : 0;
+                    System.out.printf("  > %-20s | Alındığı Tarih: %s | Kalan Gün: %d | Depozito: %.2f TL%n", b.getTitle(), effectiveDate, daysLeft, dep);
                 }
             }
         }
@@ -373,23 +564,17 @@ public class Main {
         int poolSize = bookPool.getNewArrivals().size() + bookPool.getReturnedBooks().size();
         System.out.println("\n" + "=".repeat(60));
         System.out.printf(" TARİH: %s | ENVANTER: %d | HAVUZ: %d Kitap%n", systemDate, manager.searchBookByTitle("").size(), poolSize);
-        System.out.printf(" KASA (Harcanabilir): %.2f TL%n", budget.getAvailableBalance());
+        System.out.printf(" KASA (Harcanabilir): %.2f TL | DEPOZİTO: %.2f TL%n", budget.getAvailableBalance(), loanService.getTotalValueInDepositWait());
         System.out.println("=".repeat(60));
-        System.out.println(" 1. Üye Kaydı");
-        System.out.println(" 2. Üye Listesi (Detaylı)");
-        System.out.println(" 3. Kitap Ödünç Ver");
-        System.out.println(" 4. Kitap İade Al");
-        System.out.println(" 5. Tüm Envanteri Listele");
-        System.out.println(" 6. Kategoriye Göre Listele");
-        System.out.println(" 7. Yazara Göre Kitap Ara");
-        System.out.println(" 8. Kitap Sil / Güncelle");
-        System.out.println(" 9. Yeni Kitap Satın Al");
-        System.out.println("10. Kitap Havuzunu İşle");
-        System.out.println("11. Üye Borç Ödeme");
-        System.out.println("12. Bağış Yap");
-        System.out.println("13. Zamanı İlerlet (+Gün)");
-        System.out.println("14. ÜYE SİL");
-        System.out.println(" 0. Çıkış");
+        System.out.println(" 1. Üye Kaydı          9. Yeni Kitap Satın Al");
+        System.out.println(" 2. Üye Listesi       10. Kitap Havuzunu İşle");
+        System.out.println(" 3. Kitap Ödünç Ver   11. Üye Borç Ödeme");
+        System.out.println(" 4. Kitap İade Al     12. Bağış Yap");
+        System.out.println(" 5. Envanter Listele  13. Zamanı İlerlet");
+        System.out.println(" 6. Kategori Listele  14. Üye Sil");
+        System.out.println(" 7. Yazar Ara         15. Üye Güncelle");
+        System.out.println(" 8. Kitap Sil/Güncel  16. Detaylı Bütçe / Kasa");
+        System.out.println(" 0. Çıkış             17. Kitap Kimde? (Sorgu)");
         System.out.print("Seçiminiz: ");
     }
 }
